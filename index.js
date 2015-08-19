@@ -14,7 +14,7 @@ var MissingLocalizationError = require("./MissingLocalizationError");
  * @constructor
  */
 function I18nPlugin(localization, functionName, failOnMissing) {
-	this.localization = localization? ('function' === typeof localization? localization: makeLocalizFunction(localization))
+	this.localization = localization? ('function' === typeof localization? localization: makeLocalizeFunction(localization))
 									: null;
 	this.functionName = functionName || "__";
 	this.failOnMissing = failOnMissing || false;
@@ -75,7 +75,7 @@ I18nPlugin.prototype.apply = function(compiler) {
  * @param {object}	localization
  * @returns {Function}
  */
-function makeLocalizFunction(localization) {
+function makeLocalizeFunction(localization) {
 	return function localizFunction(key) {
 		return localization[key];
 	};
