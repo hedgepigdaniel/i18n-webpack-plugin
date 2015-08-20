@@ -13,60 +13,64 @@ var MissingLocalizationError = require("./MissingLocalizationError");
  * @param {boolean}			failOnMissing
  * @constructor
  */
-function I18nPlugin(localization, functionName, failOnMissing) {
-	this.localization = localization? ('function' === typeof localization? localization: makeLocalizeFunction(localization))
-									: null;
-	this.functionName = functionName || "__";
-	this.failOnMissing = failOnMissing || false;
+function I18nPlugin(opts) {
+	this.localization = opts.localization ? ('function' === typeof opts.localization ?
+		opts.localization : makeLocalizeFunction(opts.localization)) : null;
+	this.pluralLocalization = opts.pluralLocalization ? ('function' === typeof opts.pluralLocalization ?
+		opts.pluralLocalization : makeLocalizeFunction(opts.pluralLocalization)) : null;
+	this.functionName = opts.functionName || "__";
+	this.pluralFunctionName = opts.pluralFunctionName || "__n";
+	this.failOnMissing = opts.failOnMissing || false;
 }
 module.exports = I18nPlugin;
 
 I18nPlugin.prototype.apply = function(compiler) {
 	var localization = this.localization,
+		pluralLocalization = this.pluralLocalization,
 		failOnMissing = this.failOnMissing;
 	compiler.plugin("compilation", function(compilation, params) {
 		compilation.dependencyFactories.set(ConstDependency, new NullFactory());
 		compilation.dependencyTemplates.set(ConstDependency, new ConstDependency.Template());
 	});
-	compiler.parser.plugin("call " + this.functionName, function(expr) {
-		var param, defaultValue;
-		switch(expr.arguments.length) {
-		case 2:
-			param = this.evaluateExpression(expr.arguments[1]);
-			if(!param.isString()) return;
-			param = param.string;
-			defaultValue = this.evaluateExpression(expr.arguments[0]);
-			if(!defaultValue.isString()) return;
-			defaultValue = defaultValue.string;
-			break;
-		case 1:
-			param = this.evaluateExpression(expr.arguments[0]);
-			if(!param.isString()) return;
-			defaultValue = param = param.string;
-			break;
-		default:
-			return;
-		}
-		var result = localization ? localization(param) : defaultValue;
-		if(typeof result == "undefined") {
-			var error = this.state.module[__dirname];
-			if(!error) {
-				error = this.state.module[__dirname] = new MissingLocalizationError(this.state.module, param, defaultValue);
-				if (failOnMissing) {
-					this.state.module.errors.push(error);
+
+	var makeCallFunction = function(plural) {
+		return function(expr) {
+			var key = this.evaluateExpression(expr.arguments[0]).string;
+			var localisationFunction = plural ? pluralLocalization : localization;
+			var args = expr.arguments.map(this.evaluateExpression, this);
+			args = args.map(function(arg) {
+				if (arg.isString()) {
+					return arg.string;
+				} else if (arg.isNumber()) {
+					return arg.number;
 				} else {
-					this.state.module.warnings.push(error);
+					throw new Error("Invalid argument to __ or __n");
 				}
-			} else if(error.requests.indexOf(param) < 0) {
-				error.add(param, defaultValue);
+			});
+			var result = localization ? localisationFunction.apply(this, args) : key;
+			if(typeof result == "undefined" || result === key) {
+				var error = this.state.module[__dirname];
+				if(!error) {
+					error = this.state.module[__dirname] = new MissingLocalizationError(this.state.module, key, key);
+					if (failOnMissing) {
+						this.state.module.errors.push(error);
+					} else {
+						this.state.module.warnings.push(error);
+					}
+				} else if(error.requests.indexOf(key) < 0) {
+					error.add(key, key);
+				}
+				result = key;
 			}
-			result = defaultValue;
-		}
-		var dep = new ConstDependency(JSON.stringify(result), expr.range);
-		dep.loc = expr.loc;
-		this.state.current.addDependency(dep);
-		return true;
-	});
+			var dep = new ConstDependency(JSON.stringify(result), expr.range);
+			dep.loc = expr.loc;
+			this.state.current.addDependency(dep);
+			return true;
+		};
+	};
+
+	compiler.parser.plugin("call " + this.functionName, makeCallFunction(false));
+	compiler.parser.plugin("call " + this.pluralFunctionName, makeCallFunction(true));
 
 };
 
